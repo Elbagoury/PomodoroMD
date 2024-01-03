@@ -1,10 +1,14 @@
-# pomodoro_app.py
-import tkinter as tk
-from tkinter import messagebox, ttk
-from datetime import datetime, timedelta
-import re
+import sys
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QMessageBox
+from PyQt5.QtCore import QTimer, QDateTime, Qt, QCoreApplication
+from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QIcon 
 import os
+import re
 import configparser
+from qdarkstyle import load_stylesheet_pyqt5  # Import QDarkStyleSheet
+from plyer import notification
+import pygame
 
 class PomodoroModel:
     def __init__(self, tasks_directory, sessions_directory):
@@ -14,7 +18,7 @@ class PomodoroModel:
         self.sessions_directory = sessions_directory
 
     def start_timer(self):
-        self.start_time = datetime.now()
+        self.start_time = QDateTime.currentDateTime()
         self.session_count += 1
 
     def stop_timer(self):
@@ -22,61 +26,70 @@ class PomodoroModel:
 
     def calculate_duration(self, end_time):
         if self.start_time:
-            duration = end_time - self.start_time
-            minutes, seconds = divmod(duration.seconds, 60)
+            duration = self.start_time.secsTo(end_time)
+            minutes, seconds = divmod(duration, 60)
             return f"{str(minutes).zfill(2)}:{str(seconds).zfill(2)}"
         return "00:00"
 
-class PomodoroView:
-    def __init__(self, root, controller, tasks_directory, sessions_directory, theme):
-        self.root = root
+class PomodoroView(QWidget):
+    def __init__(self, controller, tasks_directory, sessions_directory):
+        super().__init__()
         self.controller = controller
         self.tasks_directory = tasks_directory
         self.sessions_directory = sessions_directory
-        self.theme = theme
 
-        self.task_name = tk.StringVar()
-        self.time_left = tk.StringVar()
-        self.session_duration = tk.IntVar(value=25)
+        self.task_name = QComboBox(self)
+        self.time_left = QLabel(self)
+        self.time_left.setFont(QFont("Arial", 40))
+        self.session_duration = QLineEdit(self)
+        self.session_duration.setText("25")
 
         self.task_list = self.read_tasks_from_files()
+        self.task_name.addItems(self.task_list)
 
         self.create_widgets()
 
     def create_widgets(self):
-        self.root.title("PomodoroMD")
-        self.root.configure(bg='#282c34' if self.theme == 'dark' else 'white')  # Set background color based on theme
+        layout = QVBoxLayout(self)
 
-        task_label = tk.Label(self.root, text="Task Name:", bg='#282c34' if self.theme == 'dark' else 'white', fg='white' if self.theme == 'dark' else 'black')
-        task_label.pack(pady=5)
+        task_layout = QHBoxLayout()
+        task_layout.addWidget(QLabel("Task Name:", self))
+        task_layout.addWidget(self.task_name)
 
-        task_dropdown = tk.OptionMenu(self.root, self.task_name, *self.task_list)
-        task_dropdown.config(bg='#282c34' if self.theme == 'dark' else 'white', fg='white' if self.theme == 'dark' else 'black', width=50)
-        task_dropdown.pack(pady=5)
+        duration_layout = QHBoxLayout()
+        duration_layout.addWidget(QLabel("Session Duration (minutes):", self))
+        duration_layout.addWidget(self.session_duration)
 
-        duration_label = tk.Label(self.root, text="Session Duration (minutes):", bg='#282c34' if self.theme == 'dark' else 'white', fg='white' if self.theme == 'dark' else 'black')
-        duration_label.pack(pady=5)
+        timer_layout = QVBoxLayout()
+        timer_layout.addWidget(self.time_left, alignment=Qt.AlignCenter)
 
-        duration_entry = tk.Entry(self.root, textvariable=self.session_duration, bg='#282c34' if self.theme == 'dark' else 'white', fg='white' if self.theme == 'dark' else 'black', insertbackground='white' if self.theme == 'dark' else 'black')
-        duration_entry.pack(pady=5)
+        self.start_button = self.create_button("Start", self.controller.start_timer)
 
-        timer_label = tk.Label(self.root, textvariable=self.time_left, font=("Helvetica", 24), bg='#282c34' if self.theme == 'dark' else 'white', fg='white' if self.theme == 'dark' else 'black')
-        timer_label.pack(pady=20)
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.start_button)
 
-        style = ttk.Style()
-        style.configure("TButton", padding=6, relief="flat", background='#61dafb' if self.theme == 'dark' else 'white', foreground='black' if self.theme == 'dark' else 'black')
+        layout.addLayout(task_layout)
+        layout.addLayout(duration_layout)
+        layout.addLayout(timer_layout)
+        layout.addLayout(button_layout)
 
-        start_button = ttk.Button(self.root, text="Start", command=self.controller.start_timer, style="TButton")
-        start_button.pack(side=tk.LEFT, padx=10)
+        self.setLayout(layout)
 
-        stop_button = ttk.Button(self.root, text="Stop", command=self.controller.stop_timer, state=tk.DISABLED, style="TButton")
-        stop_button.pack(side=tk.LEFT, padx=10)
+        # Apply the dark theme
+        self.setStyleSheet(load_stylesheet_pyqt5())
 
-        reset_button = ttk.Button(self.root, text="Reset", command=self.controller.reset_timer, state=tk.DISABLED, style="TButton")
-        reset_button.pack(side=tk.LEFT, padx=10)
+        # Set window title and icon
+        self.setWindowTitle("Pomodoro")
+        self.setWindowIcon(QIcon("icon.ico"))
 
-        save_button = ttk.Button(self.root, text="Save Session", command=self.controller.save_session, style="TButton")
-        save_button.pack(pady=20)
+    def create_button(self, text, function, enabled=True):
+        button = QPushButton(text, self)
+        button.clicked.connect(function)
+        button.setEnabled(enabled)
+        if text == "Start":
+            self.start_button = button
+        return button
+
 
     def read_tasks_from_files(self):
         tasks = []
@@ -88,20 +101,32 @@ class PomodoroView:
         return tasks
 
     def update_time(self, time_left):
-        self.time_left.set(time_left)
+        self.time_left.setText(time_left)
 
-    def show_session_completed_message(self, duration):
-        messagebox.showinfo("PomodoroMD", f"Session Completed! Duration: {duration}")
+    def show_session_completed_message(self):
+        # Show notification
+        notification_title = "PomodoroMD"
+        notification_message = f"Achievement: Your Session Completed!"
+        notification.notify(
+            title=notification_title,
+            message=notification_message,
+            app_name=notification_title
+        )
+
+        # Play alarm sound
+        pygame.mixer.init()
+        pygame.mixer.music.load("C:\\Windows\\Media\\Alarm03.wav")  # Replace with the path to your alarm sound
+        pygame.mixer.music.play()
+
 
 class PomodoroController:
-    def __init__(self, root):
+    def __init__(self, view):
         self.config = self.load_config()
         tasks_directory = self.config.get("Directories", "TasksDirectory")
         sessions_directory = self.config.get("Directories", "SessionsDirectory")
-        theme = self.config.get("Theme", "AppTheme")
 
         self.model = PomodoroModel(tasks_directory, sessions_directory)
-        self.view = PomodoroView(root, self, tasks_directory, sessions_directory, theme)
+        self.view = view(self, tasks_directory, sessions_directory)
 
     def load_config(self):
         config = configparser.ConfigParser()
@@ -109,63 +134,72 @@ class PomodoroController:
         return config
 
     def start_timer(self):
-        self.model.start_timer()
-        self.view.update_time(f"{str(self.view.session_duration.get()).zfill(2)}:00")
-        self.view.root.after_id = self.view.root.after(1000, self.update_timer)
-        self.enable_stop_reset_buttons()
+        if not self.model.start_time:
+            self.model.start_timer()
+            self.view.update_time(f"{str(self.view.session_duration.text()).zfill(2)}:00")
+            self.view.timer_id = QTimer(self.view)
+            self.view.timer_id.timeout.connect(self.update_timer)
+            self.view.timer_id.start(1000)
+            self.view.start_button.setEnabled(False)  # Disable Start button
+        else:
+            # Continue timer
+            self.view.timer_id.start(1000)
+            self.view.start_button.setEnabled(False)  # Disable Start button
 
     def update_timer(self):
-        current_time = self.view.time_left.get()
+        current_time = self.view.time_left.text()
         if current_time != "00:00":
             minutes, seconds = map(int, current_time.split(':'))
             total_seconds = minutes * 60 + seconds
             total_seconds -= 1
             minutes, seconds = divmod(total_seconds, 60)
-            self.view.time_left.set(f"{str(minutes).zfill(2)}:{str(seconds).zfill(2)}")
-            self.view.root.after_id = self.view.root.after(1000, self.update_timer)
+            self.view.update_time(f"{str(minutes).zfill(2)}:{str(seconds).zfill(2)}")
         else:
             self.stop_timer()
-            end_time = datetime.now().strftime('%H:%M')
-            duration = self.model.calculate_duration(datetime.now())
-            self.view.show_session_completed_message(duration)
+            end_time = QDateTime.currentDateTime()
+            self.enable_start_button()  # Enable Start button
 
     def stop_timer(self):
-        self.view.root.after_cancel(self.view.root.after_id)
-        self.disable_stop_reset_buttons()
+        if self.view.timer_id.isActive():
+            self.view.timer_id.stop()
+            self.view.show_session_completed_message()
+            self.save_session()  # Save session automatically when stopping the timer
+            self.is_timer_running = False
+        else:
+            self.view.timer_id.start(1000)
 
-    def reset_timer(self):
-        self.view.time_left.set(f"{str(self.view.session_duration.get()).zfill(2)}:00")
-        self.disable_stop_reset_buttons()
-
-    def enable_stop_reset_buttons(self):
-        self.view.root.children['!button2'].config(state=tk.NORMAL)
-        self.view.root.children['!button3'].config(state=tk.NORMAL)
-
-    def disable_stop_reset_buttons(self):
-        self.view.root.children['!button2'].config(state=tk.DISABLED)
-        self.view.root.children['!button3'].config(state=tk.DISABLED)
+    def enable_start_button(self):
+        # Enable Start button
+        self.view.start_button.setEnabled(True)
 
     def save_session(self):
-        task_name = self.view.task_name.get()
+        task_name = self.view.task_name.currentText()
         if task_name and self.model.start_time:
-            end_time = datetime.now().strftime('%H:%M')
-            duration = self.model.calculate_duration(datetime.now())
+            end_time = QDateTime.currentDateTime()
+            duration = self.model.calculate_duration(end_time)
 
             filename = os.path.splitext(task_name.split("|")[0].strip())[0].strip()
+            today_date = end_time.toString("yyyy-MM-dd")
 
-            session_info = f"{end_time} [[{filename}]] {task_name} duration: ({duration})\n"
-
-            today_date = datetime.now().strftime('%Y-%m-%d')
+            session_info = f"[[{filename}]] #{task_name} duration:{duration}\n"
             file_path = os.path.join(self.model.sessions_directory, f"{today_date}.md")
 
             with open(file_path, "a") as file:
                 file.write(session_info)
 
-            messagebox.showinfo("PomodoroMD", "Session saved successfully!")
+            QMessageBox.information(self.view, "PomodoroMD", "Session saved successfully!")
         else:
-            messagebox.showwarning("PomodoroMD", "Please start a session before saving the session.")
+            QMessageBox.warning(self.view, "PomodoroMD", "Please start a session before saving the session.")
+    
+    def on_close(self):
+        if self.model.start_time:
+            self.save_session()    
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    controller = PomodoroController(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    app.setStyleSheet(load_stylesheet_pyqt5())  # Apply the dark theme to the entire application
+    pygame.mixer.init()
+    pygame.mixer.music.load("C:\\Windows\\Media\\Alarm03.wav")
+    controller = PomodoroController(PomodoroView)
+    controller.view.show()
+    sys.exit(app.exec_())

@@ -1,0 +1,10 @@
+# dotfiles
+.*
+!.gitignore
+!.mailmap
+# compiled python files
+*.py[co]
+__pycache__/
+# various virtualenv
+dist
+build
